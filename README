@@ -1,0 +1,84 @@
+"""
+Step-by-step FastAPI backend for Mouth Cancer Detection with Hugging Face model
+===========================================================================
+
+Instructions:
+1. Install dependencies:
+   pip install fastapi uvicorn python-multipart transformers aiohttp
+
+2. Set your Hugging Face API token environment variable:
+   export HF_TOKEN="your_huggingface_api_token"  # Linux/Mac
+   set HF_TOKEN=your_huggingface_api_token       # Windows PowerShell
+
+3. Run the FastAPI server:
+   uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+
+4. Call POST /api/inference with an image file (multipart/form-data field name "file")
+   Example in Next.js or curl to send image for prediction.
+
+"""
+
+import os
+from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from transformers import InferenceClient
+import base64
+
+app = FastAPI(
+    title="Mouth Cancer Detection API",
+    description="API backend for mouth cancer detection using Hugging Face model.",
+    version="1.0.0"
+)
+
+# Enable CORS so frontend (like Next.js) can call this API from a different origin
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Change to your frontend URL in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Load Hugging Face API token from environment variable
+HF_TOKEN = os.getenv("HF_TOKEN")
+if not HF_TOKEN:
+    raise RuntimeError("HF_TOKEN environment variable not set. Please set it before starting the server.")
+
+# Initialize Hugging Face Inference Client
+inference_client = InferenceClient(HF_TOKEN)
+
+@app.get("/")
+async def root():
+    return {"message": "Welcome to the Mouth Cancer Detection API. Use POST /api/inference with an image file."}
+
+@app.post("/api/inference")
+async def inference_endpoint(file: UploadFile = File(...)):
+    """
+    Receives an image file upload, converts it to base64, calls
+    the Hugging Face image classification inference endpoint,
+    and returns the prediction result.
+    """
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="File must be an image.")
+
+    # Read file bytes
+    file_bytes = await file.read()
+
+    # Convert image bytes to base64 string for Hugging Face
+    base64_str = base64.b64encode(file_bytes).decode("utf-8")
+    base64_image = f"data:{file.content_type};base64,{base64_str}"
+
+    try:
+        # Call the Hugging Face inference API with your model
+        response = await inference_client.image_classification(
+            model="Lines/Open-Domain-Oral-Disease-QA-Dataset",
+            inputs=base64_image,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Inference error: {str(e)}")
+
+    return {
+        "filename": file.filename,
+        "prediction": response  # This is the raw response from Hugging Face
+    }
+
